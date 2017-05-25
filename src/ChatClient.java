@@ -2,12 +2,11 @@
 import java.net.*;
 import javax.net.ssl.*;
 import java.io.*;
-import java.util.*;
 
 
 public class ChatClient implements Runnable {
     private SSLSocketFactory socket_factory = null;
-    private SSLSocket socket                   = null;
+    private Socket socket                   = null;
     private Thread thread                   = null;
     private DataInputStream  console        = null;
     private DataOutputStream streamOut      = null;
@@ -19,10 +18,7 @@ public class ChatClient implements Runnable {
         try {
             // Establishes connection with server (name and port)
             socket_factory = (SSLSocketFactory) SSLSocketFactory.getDefault();
-            socket = (SSLSocket)socket_factory.createSocket(serverName, serverPort);
-            socket.setEnabledCipherSuites(new String[]{"TLS_RSA_WITH_AES_256_CBC_SHA"});
-            String[] ciphers = socket.getEnabledCipherSuites();
-            System.out.println("List of Cipher Suites: " + Arrays.toString(ciphers));
+            socket = socket_factory.createSocket(serverName, serverPort);
             System.out.println("Connected to server: " + socket);
             start();
         }
