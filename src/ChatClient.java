@@ -151,8 +151,6 @@ public class ChatClient implements Runnable {
             return false;
         }
 
-        // System.out.println("Symmetric key: " + Arrays.toString(secretKey.getEncoded()));
-
         // Encrypt message
         try {
             Cipher cipher = Cipher.getInstance("RSA");
@@ -218,9 +216,6 @@ public class ChatClient implements Runnable {
             return false;
         }
 
-        // System.out.println("Encrypted signature: " + Arrays.toString(encryptedSignature));
-        // System.out.println("Signature: " + Arrays.toString(signedKey));
-
         // Send message to server
         try {
             streamOut.writeInt(encryptedSignature.length);
@@ -230,6 +225,21 @@ public class ChatClient implements Runnable {
             System.out.println("Symmetric key signature sent to server.");
         } catch (IOException e) {
             System.out.println("Error sending symmetric key signature to server.");
+            return false;
+        }
+
+        // Receive ack from server
+        try {
+            DataInputStream streamIn = new DataInputStream(socket.getInputStream());
+            byte success = streamIn.readByte();
+            if(success == 6) {
+                System.out.println("Received acknowledge message from server.");
+            } else {
+                System.out.println("Error receiving acknowledge message from server.");
+                return false;
+            }
+        } catch (IOException e) {
+            System.out.println("Error receiving acknowledge message from server.");
             return false;
         }
 

@@ -316,9 +316,6 @@ class ChatServerThread extends Thread {
             return false;
         }
 
-        // System.out.println("Symmetric key: " + Arrays.toString(symmetricKey.getEncoded()));
-        // System.out.println("Encrypted signature: " + Arrays.toString(encryptedSignature));
-
         // Decrypt symmetric key signature
         try {
             Cipher cipher = Cipher.getInstance("AES");
@@ -335,8 +332,6 @@ class ChatServerThread extends Thread {
             System.out.println("Invalid key. Can't decrypt symmetric key signature.");
             return false;
         }
-
-        // System.out.println("Signature: " + Arrays.toString(signatureBytes));
 
         // Verify signature
         try {
@@ -360,6 +355,16 @@ class ChatServerThread extends Thread {
             System.out.println("Signature correctly verified. Saving symmetric key.");
         } else {
             System.out.println("Couldn't verify symmetric key signature.");
+        }
+
+        // Send ack to client
+        try {
+            streamOut.writeByte(6);
+            streamOut.flush();
+            System.out.println("Sending acknowledge message to client.");
+        } catch (IOException e) {
+            System.out.println("Error sending acknowledge message to client.");
+            return false;
         }
 
         return result;
