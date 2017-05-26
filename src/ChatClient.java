@@ -1,9 +1,16 @@
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
+import javax.crypto.NoSuchPaddingException;
+import javax.crypto.SecretKey;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.net.Socket;
 import java.net.UnknownHostException;
 import java.security.*;
+import java.security.spec.InvalidKeySpecException;
+import java.security.spec.X509EncodedKeySpec;
+import java.util.Arrays;
 
 
 public class ChatClient implements Runnable {
@@ -14,6 +21,7 @@ public class ChatClient implements Runnable {
     private ChatClientThread client = null;
     private PrivateKey privateKey = null;
     private PublicKey publicKey = null;
+    private PublicKey serverPublicKey = null;
 
     public ChatClient(String serverName, int serverPort) {
         System.out.println("Establishing connection to server...");
@@ -70,8 +78,7 @@ public class ChatClient implements Runnable {
         streamOut = new DataOutputStream(socket.getOutputStream());
     }
 
-    private boolean handShake() throws IOException {
-        DataInputStream streamIn = new DataInputStream(socket.getInputStream());
+    private boolean handShake() {
         // Generate key pair
         try {
             System.out.println("Generating key pair.");
@@ -85,6 +92,53 @@ public class ChatClient implements Runnable {
             System.out.println("Key pair generated.");
         } catch (Exception e) {
             System.out.println("Error generating key pair.");
+            return false;
+        }
+
+        // Send public key to server
+        try {
+            streamOut.writeInt(publicKey.getEncoded().length);
+            streamOut.flush();
+            streamOut.write(publicKey.getEncoded());
+            streamOut.flush();
+            System.out.println("Public key sent to server.");
+        } catch (IOException e) {
+            System.out.println("Error sending public key to server.");
+            return false;
+        }
+
+        // Get server public key
+        try {
+            DataInputStream streamIn = new DataInputStream(socket.getInputStream());
+            int keyLength = streamIn.readInt();
+            byte[] keyBytes = new byte[keyLength];
+            streamIn.read(keyBytes, 0, keyLength);
+            X509EncodedKeySpec pubKeySpec = new X509EncodedKeySpec(keyBytes);
+            KeyFactory keyFactory = null;
+            keyFactory = KeyFactory.getInstance("RSA");
+            serverPublicKey = keyFactory.generatePublic(pubKeySpec);
+            System.out.println("Received public key from server.");
+        } catch (IOException e) {
+            System.out.println("Error receiving public key from socket.");
+            return false;
+        } catch (NoSuchAlgorithmException e) {
+            System.out.println("Error generating key factory.");
+            return false;
+        } catch (InvalidKeySpecException e) {
+            System.out.println("Error converting key.");
+            return false;
+        }
+
+
+        // Generate symmetric key
+        try {
+            SecureRandom random = SecureRandom.getInstance("SHA1PRNG");
+            KeyGenerator keyGenerator = KeyGenerator.getInstance("AES");
+            keyGenerator.init(256, random);
+            SecretKey secretKey = keyGenerator.generateKey();
+            System.out.println("Symmetric key generated.");
+        } catch (NoSuchAlgorithmException e) {
+            System.out.println("Error generating symmetric key.");
             return false;
         }
 

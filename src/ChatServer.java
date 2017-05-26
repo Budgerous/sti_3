@@ -2,6 +2,9 @@ import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.security.*;
+import java.security.spec.InvalidKeySpecException;
+import java.security.spec.X509EncodedKeySpec;
+import java.util.Arrays;
 
 
 public class ChatServer implements Runnable {
@@ -9,8 +12,13 @@ public class ChatServer implements Runnable {
     private ServerSocket server_socket = null;
     private Thread thread = null;
     private int clientCount = 0;
+    protected PrivateKey privateKey = null;
+    protected PublicKey publicKey = null;
 
     public ChatServer(int port) {
+        if(!setKeys()) {
+            return;
+        }
         try {
             // Binds to port and starts server
             System.out.println("Binding to port " + port);
@@ -120,6 +128,25 @@ public class ChatServer implements Runnable {
             System.out.println("Client refused: maximum " + clients.length + " reached.");
     }
 
+    private boolean setKeys() {
+        // Generate key pair
+        try {
+            System.out.println("Generating key pair.");
+            KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA");
+            SecureRandom random = SecureRandom.getInstance("SHA1PRNG");
+            keyGen.initialize(2048, random);
+
+            KeyPair pair = keyGen.generateKeyPair();
+            privateKey = pair.getPrivate();
+            publicKey = pair.getPublic();
+            System.out.println("Key pair generated.");
+        } catch (Exception e) {
+            System.out.println("Error generating key pair.");
+            return false;
+        }
+        return true;
+    }
+
 
     public static void main(String args[]) {
         ChatServer server = null;
@@ -140,8 +167,7 @@ class ChatServerThread extends Thread {
     private int ID = -1;
     private DataInputStream streamIn = null;
     private DataOutputStream streamOut = null;
-    private PrivateKey privateKey = null;
-    private PublicKey publicKey = null;
+    private PublicKey clientPublicKey = null;
 
 
     public ChatServerThread(ChatServer _server, Socket _socket) {
@@ -200,21 +226,37 @@ class ChatServerThread extends Thread {
     }
 
     public boolean handShake() {
-        // Generate key pair
+        // Get client public key
         try {
-            System.out.println("Generating key pair.");
-            KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA");
-            SecureRandom random = SecureRandom.getInstance("SHA1PRNG");
-            keyGen.initialize(2048, random);
-
-            KeyPair pair = keyGen.generateKeyPair();
-            privateKey = pair.getPrivate();
-            publicKey = pair.getPublic();
-            System.out.println("Key pair generated.");
-        } catch (Exception e) {
-            System.out.println("Error generating key pair.");
+            int keyLength = streamIn.readInt();
+            byte[] keyBytes = new byte[keyLength];
+            streamIn.read(keyBytes, 0, keyLength);
+            X509EncodedKeySpec pubKeySpec = new X509EncodedKeySpec(keyBytes);
+            KeyFactory keyFactory = null;
+            keyFactory = KeyFactory.getInstance("RSA");
+            clientPublicKey = keyFactory.generatePublic(pubKeySpec);
+            System.out.println("Received public key from client.");
+        } catch (IOException e) {
+            System.out.println("Error receiving public key from socket.");
+            return false;
+        } catch (NoSuchAlgorithmException e) {
+            System.out.println("Error generating key factory.");
+            return false;
+        } catch (InvalidKeySpecException e) {
+            System.out.println("Error converting key.");
             return false;
         }
+
+        // Send public key to client
+        try {
+            streamOut.writeInt(server.publicKey.getEncoded().length);
+            streamOut.flush();
+            streamOut.write(server.publicKey.getEncoded());
+            streamOut.flush();
+        } catch (IOException e) {
+            System.out.println("Error sending public key to client.");
+        }
+
 
         System.out.println("Handshake completed.");
         return true;
