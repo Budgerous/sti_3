@@ -1,10 +1,11 @@
+import javax.crypto.*;
+import javax.crypto.spec.SecretKeySpec;
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.security.*;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.X509EncodedKeySpec;
-import java.util.Arrays;
 
 
 public class ChatServer implements Runnable {
@@ -168,6 +169,7 @@ class ChatServerThread extends Thread {
     private DataInputStream streamIn = null;
     private DataOutputStream streamOut = null;
     private PublicKey clientPublicKey = null;
+    private SecretKey symmetricKey = null;
 
 
     public ChatServerThread(ChatServer _server, Socket _socket) {
@@ -255,11 +257,112 @@ class ChatServerThread extends Thread {
             streamOut.flush();
         } catch (IOException e) {
             System.out.println("Error sending public key to client.");
+            return false;
         }
 
+        if(!negotiateSymmetricKey()) {
+            System.out.println("Error negotiating symmetric key.");
+            return false;
+        }
 
         System.out.println("Handshake completed.");
         return true;
+    }
+
+    private boolean negotiateSymmetricKey(){
+        byte[] encryptedSymmetricKey = null;
+        byte[] decryptedSymmetricKey = null;
+        byte[] encryptedSignature = null;
+        byte[] signatureBytes = null;
+        boolean result = false;
+        // Get encrypted key
+        try {
+            int keyLength = streamIn.readInt();
+            encryptedSymmetricKey = new byte[keyLength];
+            streamIn.read(encryptedSymmetricKey, 0, keyLength);
+            System.out.println("Received encrypted symmetric key from client.");
+        } catch (IOException e) {
+            System.out.println("Error receiving encrypted symmetric key from socket.");
+            return false;
+        }
+
+        // Decrypt symmetric key
+        try {
+            Cipher cipher = Cipher.getInstance("RSA");
+            cipher.init(Cipher.DECRYPT_MODE, server.privateKey);
+            cipher.update(encryptedSymmetricKey);
+            decryptedSymmetricKey = cipher.doFinal();
+            symmetricKey = new SecretKeySpec(decryptedSymmetricKey, 0, decryptedSymmetricKey.length, "AES");
+            System.out.println("Decrypted received symmetric key.");
+        } catch (NoSuchAlgorithmException e) {
+            System.out.println("Can't decrypt RSA digests.");
+            return false;
+        } catch (NoSuchPaddingException|BadPaddingException|IllegalBlockSizeException e) {
+            System.out.println("Error.");
+            return false;
+        } catch (InvalidKeyException e) {
+            System.out.println("Invalid key. Can't decrypt symmetric key.");
+            return false;
+        }
+
+        // Get encrypted signature
+        try {
+            int signLength = streamIn.readInt();
+            encryptedSignature = new byte[signLength];
+            streamIn.read(encryptedSignature, 0, signLength);
+            System.out.println("Received encrypted symmetric key signature from client.");
+        } catch (IOException e) {
+            System.out.println("Error receiving encrypted symmetric key signature from socket.");
+            return false;
+        }
+
+        // System.out.println("Symmetric key: " + Arrays.toString(symmetricKey.getEncoded()));
+        // System.out.println("Encrypted signature: " + Arrays.toString(encryptedSignature));
+
+        // Decrypt symmetric key signature
+        try {
+            Cipher cipher = Cipher.getInstance("AES");
+            cipher.init(Cipher.DECRYPT_MODE, symmetricKey);
+            signatureBytes = cipher.doFinal(encryptedSignature);
+            System.out.println("Decrypted received symmetric key signature.");
+        } catch (NoSuchAlgorithmException e) {
+            System.out.println("Can't decrypt AES digests.");
+            return false;
+        } catch (NoSuchPaddingException|BadPaddingException|IllegalBlockSizeException e) {
+            System.out.println("Error.");
+            return false;
+        } catch (InvalidKeyException e) {
+            System.out.println("Invalid key. Can't decrypt symmetric key signature.");
+            return false;
+        }
+
+        // System.out.println("Signature: " + Arrays.toString(signatureBytes));
+
+        // Verify signature
+        try {
+            Signature signature = Signature.getInstance("SHA256WithRSA");
+            signature.initVerify(clientPublicKey);
+            signature.update(decryptedSymmetricKey);
+            result = signature.verify(signatureBytes);
+        } catch (NoSuchAlgorithmException e) {
+            System.out.println("Can't verify RSA signatures.");
+            return false;
+        } catch (SignatureException e) {
+            e.printStackTrace();
+            System.out.println("Can't verify signature.");
+            return false;
+        } catch (InvalidKeyException e) {
+            System.out.println("Can't verify signature with this key.");
+            return false;
+        }
+
+        if(result) {
+            System.out.println("Signature correctly verified. Saving symmetric key.");
+        } else {
+            System.out.println("Couldn't verify symmetric key signature.");
+        }
+
+        return result;
     }
 }
 

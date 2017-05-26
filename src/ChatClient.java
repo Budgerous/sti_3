@@ -1,7 +1,4 @@
-import javax.crypto.Cipher;
-import javax.crypto.KeyGenerator;
-import javax.crypto.NoSuchPaddingException;
-import javax.crypto.SecretKey;
+import javax.crypto.*;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -10,7 +7,6 @@ import java.net.UnknownHostException;
 import java.security.*;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.X509EncodedKeySpec;
-import java.util.Arrays;
 
 
 public class ChatClient implements Runnable {
@@ -22,6 +18,7 @@ public class ChatClient implements Runnable {
     private PrivateKey privateKey = null;
     private PublicKey publicKey = null;
     private PublicKey serverPublicKey = null;
+    private SecretKey secretKey = null;
 
     public ChatClient(String serverName, int serverPort) {
         System.out.println("Establishing connection to server...");
@@ -129,20 +126,113 @@ public class ChatClient implements Runnable {
             return false;
         }
 
+        if(!negotiateSymmetricKey()) {
+            System.out.println("Error negotiating symmetric key.");
+            return false;
+        }
 
+        System.out.println("Handshake completed.");
+        return true;
+    }
+
+    private boolean negotiateSymmetricKey() {
+        byte[] encryptedSymmKey = null;
+        byte[] signedKey = null;
+        byte[] encryptedSignature = null;
         // Generate symmetric key
         try {
             SecureRandom random = SecureRandom.getInstance("SHA1PRNG");
             KeyGenerator keyGenerator = KeyGenerator.getInstance("AES");
             keyGenerator.init(256, random);
-            SecretKey secretKey = keyGenerator.generateKey();
+            secretKey = keyGenerator.generateKey();
             System.out.println("Symmetric key generated.");
         } catch (NoSuchAlgorithmException e) {
             System.out.println("Error generating symmetric key.");
             return false;
         }
 
-        System.out.println("Handshake completed.");
+        // System.out.println("Symmetric key: " + Arrays.toString(secretKey.getEncoded()));
+
+        // Encrypt message
+        try {
+            Cipher cipher = Cipher.getInstance("RSA");
+            cipher.init(Cipher.ENCRYPT_MODE, serverPublicKey);
+            cipher.update(secretKey.getEncoded());
+            encryptedSymmKey = cipher.doFinal();
+            System.out.println("Successfully encrypted symmetric key with server public key.");
+        } catch (NoSuchAlgorithmException e) {
+            System.out.println("Can't encrypt message with RSA.");
+            return false;
+        } catch (NoSuchPaddingException|BadPaddingException|IllegalBlockSizeException e) {
+            System.out.println("Error.");
+            return false;
+        } catch (InvalidKeyException e) {
+            System.out.println("Can't encrypt message with your key.");
+            return false;
+        }
+
+        // Send message to server
+        try {
+            streamOut.writeInt(encryptedSymmKey.length);
+            streamOut.flush();
+            streamOut.write(encryptedSymmKey);
+            streamOut.flush();
+            System.out.println("Symmetric key sent to server.");
+        } catch (IOException e) {
+            System.out.println("Error sending symmetric key to server.");
+            return false;
+        }
+
+        // Sign symmetric key
+        try {
+            Signature signature = Signature.getInstance("SHA256WithRSA");
+            signature.initSign(privateKey);
+            signature.update(secretKey.getEncoded());
+            signedKey = signature.sign();
+            System.out.println("Symmetric key signed with private key.");
+        } catch (NoSuchAlgorithmException e) {
+            System.out.println("Error generating key signer.");
+            return false;
+        } catch (SignatureException e) {
+            System.out.println("Error signing key.");
+            return false;
+        } catch (InvalidKeyException e) {
+            System.out.println("Error seeding private key for signature.");
+            return false;
+        }
+
+        // Encrypt message
+        try {
+            Cipher cipher = Cipher.getInstance("AES");
+            cipher.init(Cipher.ENCRYPT_MODE, secretKey);
+            encryptedSignature = cipher.doFinal(signedKey);
+            System.out.println("Successfully encrypted symmetric key signature with symmetric key.");
+        } catch (NoSuchAlgorithmException e) {
+            System.out.println("Can't encrypt message with AES.");
+            return false;
+        } catch (NoSuchPaddingException|BadPaddingException|IllegalBlockSizeException e) {
+            System.out.println("Error.");
+            return false;
+        } catch (InvalidKeyException e) {
+            System.out.println("Can't encrypt message with your key.");
+            return false;
+        }
+
+        // System.out.println("Encrypted signature: " + Arrays.toString(encryptedSignature));
+        // System.out.println("Signature: " + Arrays.toString(signedKey));
+
+        // Send message to server
+        try {
+            streamOut.writeInt(encryptedSignature.length);
+            streamOut.flush();
+            streamOut.write(encryptedSignature);
+            streamOut.flush();
+            System.out.println("Symmetric key signature sent to server.");
+        } catch (IOException e) {
+            System.out.println("Error sending symmetric key signature to server.");
+            return false;
+        }
+
         return true;
     }
 
