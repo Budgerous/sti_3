@@ -6,6 +6,7 @@ import java.net.Socket;
 import java.security.*;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.X509EncodedKeySpec;
+import java.util.Arrays;
 
 
 public class ChatServer implements Runnable {
@@ -79,10 +80,20 @@ public class ChatServer implements Runnable {
                 if (i != leaving_id)
                     clients[i].send("Client " + ID + " exits..");
             remove(ID);
-        } else
+        } else {
+            System.out.println(ID + ": " + input);
             // Brodcast message for every other client online
             for (int i = 0; i < clientCount; i++)
                 clients[i].send(ID + ": " + input);
+        }
+        clients[findClient(ID)].setCount(clients[findClient(ID)].getCount() + 1);
+        if(clients[findClient(ID)].getCount()%10 == 0) {
+            clients[findClient(ID)].send(".renew");
+            if(!clients[findClient(ID)].negotiateSymmetricKey()) {
+                clients[findClient(ID)].send(".quit");
+                remove(ID);
+            }
+        }
     }
 
     public synchronized void remove(int ID) {
@@ -166,11 +177,19 @@ class ChatServerThread extends Thread {
     private ChatServer server = null;
     private Socket socket = null;
     private int ID = -1;
+    private int count = 0;
     private DataInputStream streamIn = null;
     private DataOutputStream streamOut = null;
     private PublicKey clientPublicKey = null;
     private SecretKey symmetricKey = null;
 
+    public int getCount() {
+        return count;
+    }
+
+    public void setCount(int count) {
+        this.count = count;
+    }
 
     public ChatServerThread(ChatServer _server, Socket _socket) {
         super();
@@ -181,8 +200,29 @@ class ChatServerThread extends Thread {
 
     // Sends message to client
     public void send(String msg) {
+        byte[] toSend = null;
+
+        // Encrypt message
         try {
-            streamOut.writeUTF(msg);
+            Cipher cipher = Cipher.getInstance("AES");
+            cipher.init(Cipher.ENCRYPT_MODE, symmetricKey);
+            toSend = cipher.doFinal(msg.getBytes());
+            System.out.println("Successfully encrypted message with symmetric key.");
+        } catch (NoSuchAlgorithmException e) {
+            System.out.println("Can't encrypt message with AES.");
+            return;
+        } catch (NoSuchPaddingException|BadPaddingException|IllegalBlockSizeException e) {
+            System.out.println("Error.");
+            return;
+        } catch (InvalidKeyException e) {
+            System.out.println("Can't encrypt message with your key.");
+            return;
+        }
+
+        try {
+            streamOut.writeInt(toSend.length);
+            streamOut.flush();
+            streamOut.write(toSend, 0, toSend.length);
             streamOut.flush();
         } catch (IOException ioexception) {
             System.out.println(ID + " ERROR sending message: " + ioexception.getMessage());
@@ -202,7 +242,30 @@ class ChatServerThread extends Thread {
 
         while (true) {
             try {
-                server.handle(ID, streamIn.readUTF());
+                int size = streamIn.readInt();
+                byte[] input = new byte[size];
+                streamIn.read(input, 0, size);
+                byte[] toSend = null;
+
+                // Decrypt message
+                try {
+                    Cipher cipher = Cipher.getInstance("AES");
+                    cipher.init(Cipher.DECRYPT_MODE, symmetricKey);
+                    toSend = cipher.doFinal(input);
+                    System.out.println("Decrypted received message.");
+                } catch (NoSuchAlgorithmException e) {
+                    System.out.println("Can't decrypt AES digests.");
+                    continue;
+                } catch (NoSuchPaddingException|BadPaddingException|IllegalBlockSizeException e) {
+                    System.out.println("Error.");
+                    e.printStackTrace();
+                    continue;
+                } catch (InvalidKeyException e) {
+                    System.out.println("Invalid key. Can't decrypt symmetric key signature.");
+                    continue;
+                }
+
+                server.handle(ID, new String(toSend));
             } catch (IOException ioe) {
                 System.out.println(ID + " ERROR reading: " + ioe.getMessage());
                 server.remove(ID);
@@ -227,7 +290,7 @@ class ChatServerThread extends Thread {
         if (streamOut != null) streamOut.close();
     }
 
-    public boolean handShake() {
+    boolean handShake() {
         // Get client public key
         try {
             int keyLength = streamIn.readInt();
@@ -269,7 +332,7 @@ class ChatServerThread extends Thread {
         return true;
     }
 
-    private boolean negotiateSymmetricKey(){
+    boolean negotiateSymmetricKey(){
         byte[] encryptedSymmetricKey = null;
         byte[] decryptedSymmetricKey = null;
         byte[] encryptedSignature = null;

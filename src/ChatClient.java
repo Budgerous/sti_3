@@ -7,6 +7,7 @@ import java.net.UnknownHostException;
 import java.security.*;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.X509EncodedKeySpec;
+import java.util.Arrays;
 
 
 public class ChatClient implements Runnable {
@@ -15,10 +16,10 @@ public class ChatClient implements Runnable {
     private DataInputStream console = null;
     private DataOutputStream streamOut = null;
     private ChatClientThread client = null;
-    private PrivateKey privateKey = null;
-    private PublicKey publicKey = null;
-    private PublicKey serverPublicKey = null;
-    private SecretKey secretKey = null;
+    protected PrivateKey privateKey = null;
+    protected PublicKey publicKey = null;
+    protected PublicKey serverPublicKey = null;
+    protected SecretKey secretKey = null;
 
     public ChatClient(String serverName, int serverPort) {
         System.out.println("Establishing connection to server...");
@@ -48,7 +49,29 @@ public class ChatClient implements Runnable {
         while (thread != null) {
             try {
                 // Sends message from console to server
-                streamOut.writeUTF(console.readLine());
+                String input = console.readLine();
+                byte[] toSend = null;
+
+                // Encrypt message
+                try {
+                    Cipher cipher = Cipher.getInstance("AES");
+                    cipher.init(Cipher.ENCRYPT_MODE, secretKey);
+                    toSend = cipher.doFinal(input.getBytes());
+                    System.out.println("Successfully encrypted message with symmetric key.");
+                } catch (NoSuchAlgorithmException e) {
+                    System.out.println("Can't encrypt message with AES.");
+                    return;
+                } catch (NoSuchPaddingException|BadPaddingException|IllegalBlockSizeException e) {
+                    System.out.println("Error.");
+                    return;
+                } catch (InvalidKeyException e) {
+                    System.out.println("Can't encrypt message with your key.");
+                    return;
+                }
+
+                streamOut.writeInt(toSend.length);
+                streamOut.flush();
+                streamOut.write(toSend, 0, toSend.length);
                 streamOut.flush();
             } catch (IOException ioexception) {
                 System.out.println("Error sending string to server: " + ioexception.getMessage());
@@ -64,9 +87,12 @@ public class ChatClient implements Runnable {
             // Leaving, quit command
             System.out.println("Exiting...Please press RETURN to exit ...");
             stop();
-        } else
+        } else if(msg.equals(".renew")) {
+            negotiateSymmetricKey();
+        } else {
             // else, writes message received from server to console
             System.out.println(msg);
+        }
     }
 
     private void setStreams() throws IOException {
@@ -317,7 +343,29 @@ class ChatClientThread extends Thread {
     public void run() {
         while (true) {
             try {
-                client.handle(streamIn.readUTF());
+                int size = streamIn.readInt();
+                byte[] input = new byte[size];
+                streamIn.read(input, 0, size);
+                byte[] toSend = null;
+
+                // Decrypt symmetric key signature
+                try {
+                    Cipher cipher = Cipher.getInstance("AES");
+                    cipher.init(Cipher.DECRYPT_MODE, client.secretKey);
+                    toSend = cipher.doFinal(input);
+                    System.out.println("Decrypted received message.");
+                } catch (NoSuchAlgorithmException e) {
+                    System.out.println("Can't decrypt AES digests.");
+                    continue;
+                } catch (NoSuchPaddingException|BadPaddingException|IllegalBlockSizeException e) {
+                    System.out.println("Error.");
+                    continue;
+                } catch (InvalidKeyException e) {
+                    System.out.println("Invalid key. Can't decrypt symmetric key signature.");
+                    continue;
+                }
+
+                client.handle(new String(toSend));
             } catch (IOException ioe) {
                 System.out.println("Listening error: " + ioe.getMessage());
                 client.stop();
