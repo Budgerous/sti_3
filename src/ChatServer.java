@@ -1,5 +1,3 @@
-import jdk.nashorn.internal.ir.Block;
-
 import javax.crypto.*;
 import javax.crypto.spec.SecretKeySpec;
 import java.io.*;
@@ -10,8 +8,6 @@ import java.security.spec.InvalidKeySpecException;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
 import java.util.StringTokenizer;
 
 

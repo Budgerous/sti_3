@@ -7,7 +7,6 @@ import java.net.UnknownHostException;
 import java.security.*;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.X509EncodedKeySpec;
-import java.util.Arrays;
 
 
 public class ChatClient implements Runnable {
