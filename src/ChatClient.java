@@ -9,7 +9,6 @@ import java.security.spec.InvalidKeySpecException;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
 import java.util.ArrayList;
-import java.util.Arrays;
 
 
 public class ChatClient implements Runnable {
@@ -18,13 +17,10 @@ public class ChatClient implements Runnable {
     private DataInputStream console = null;
     private DataOutputStream streamOut = null;
     private ChatClientThread client = null;
-    protected PrivateKey privateKey = null;
-    protected PublicKey publicKey = null;
-    protected PublicKey serverPublicKey = null;
-    protected SecretKey secretKey = null;
-    String keyFile;
-    String username;
-    byte[] password;
+    private PrivateKey privateKey = null;
+    private PublicKey publicKey = null;
+    PublicKey serverPublicKey = null;
+    SecretKey secretKey = null;
 
     public ChatClient(String serverName, int serverPort) {
         System.out.println("Establishing connection to server...");
@@ -56,6 +52,7 @@ public class ChatClient implements Runnable {
                 // Sends message from console to server
                 String input = console.readLine();
                 byte[] toSend = null;
+                byte[] signatureBytes = null;
 
                 // Encrypt message
                 try {
@@ -74,9 +71,21 @@ public class ChatClient implements Runnable {
                     return;
                 }
 
+                // Sign message
+                try {
+                    Signature signature = Signature.getInstance("SHA256WithRSA");
+                    signature.initSign(privateKey);
+                    signature.update(input.getBytes());
+                    signatureBytes = signature.sign();
+                } catch (NoSuchAlgorithmException|InvalidKeyException|SignatureException e) {
+                    e.printStackTrace();
+                }
+
                 streamOut.writeInt(toSend.length);
                 streamOut.flush();
                 streamOut.write(toSend, 0, toSend.length);
+                streamOut.flush();
+                streamOut.write(signatureBytes, 0, 256);
                 streamOut.flush();
             } catch (IOException ioexception) {
                 System.out.println("Error sending string to server: " + ioexception.getMessage());
@@ -85,20 +94,21 @@ public class ChatClient implements Runnable {
         }
     }
 
-    boolean setKeys() {
+    @SuppressWarnings("unchecked")
+    private boolean setKeys() {
         DataInputStream dis = new DataInputStream(System.in);
-        password = new byte[32];
+        byte[] password = new byte[32];
         FileInputStream fis = null;
         ObjectInputStream ois = null;
-        String keyFile = null;
         boolean fileExists = true;
 
         // Read username and password
+        String keyFile;
         try {
             System.out.println("Insert username: ");
-            username = dis.readLine();
+            String username = dis.readLine();
             System.out.println("Insert password: ");
-            dis.read(password, 0, 32);
+            int ignored = dis.read(password, 0, 32);
             keyFile = Paths.get(".keys", username.concat(".keys")).toString();
         } catch (IOException e) {
             System.out.println("Something went horribly wrong. We're soory.");
@@ -150,8 +160,6 @@ public class ChatClient implements Runnable {
                 return false;
             }
         }
-
-        ois = null;
 
         // Try and open the file again
         try {
@@ -206,17 +214,22 @@ public class ChatClient implements Runnable {
         return true;
     }
 
-    public void handle(String msg) {
+    void handle(String msg) {
         // Receives message from server
-        if (msg.equals(".quit")) {
-            // Leaving, quit command
-            System.out.println("Exiting...Please press RETURN to exit ...");
-            stop();
-        } else if(msg.equals(".renew")) {
-            negotiateSymmetricKey();
-        } else {
-            // else, writes message received from server to console
-            System.out.println(msg);
+        switch (msg) {
+            case ".quit": {
+                // Leaving, quit command
+                System.out.println("Exiting...Please press RETURN to exit ...");
+                stop();
+                break;
+            } case ".renew": {
+                negotiateSymmetricKey();
+                break;
+            } default: {
+                // else, writes message received from server to console
+                System.out.println(msg);
+                break;
+            }
         }
     }
 
@@ -282,9 +295,9 @@ public class ChatClient implements Runnable {
     }
 
     private boolean negotiateSymmetricKey() {
-        byte[] encryptedSymmKey = null;
-        byte[] signedKey = null;
-        byte[] encryptedSignature = null;
+        byte[] encryptedSymmKey;
+        byte[] signedKey;
+        byte[] encryptedSignature;
         // Generate symmetric key
         try {
             SecureRandom random = SecureRandom.getInstance("SHA1PRNG");
@@ -393,7 +406,7 @@ public class ChatClient implements Runnable {
     }
 
     // Inits new client thread
-    public void start() throws IOException {
+    private void start() throws IOException {
         if (thread == null) {
             client = new ChatClientThread(this, socket);
             thread = new Thread(this);
@@ -402,15 +415,21 @@ public class ChatClient implements Runnable {
     }
 
     // Stops client thread
-    public void stop() {
+    void stop() {
         if (thread != null) {
             thread.stop();
             thread = null;
         }
         try {
-            if (console != null) console.close();
-            if (streamOut != null) streamOut.close();
-            if (socket != null) socket.close();
+            if (console != null) {
+                console.close();
+            }
+            if (streamOut != null) {
+                streamOut.close();
+            }
+            if (socket != null) {
+                socket.close();
+            }
         } catch (IOException ioe) {
             System.out.println("Error closing thread...");
         }
@@ -418,17 +437,15 @@ public class ChatClient implements Runnable {
         client.stop();
     }
 
-
     public static void main(String args[]) {
-        ChatClient client = null;
-        if (args.length != 2)
+        if (args.length != 2) {
             // Displays correct usage syntax on stdout
             System.out.println("Usage: java ChatClient host port");
-        else
+        } else {
             // Calls new client
-            client = new ChatClient(args[0], Integer.parseInt(args[1]));
+            new ChatClient(args[0], Integer.parseInt(args[1]));
+        }
     }
-
 }
 
 class ChatClientThread extends Thread {
@@ -436,14 +453,14 @@ class ChatClientThread extends Thread {
     private ChatClient client = null;
     private DataInputStream streamIn = null;
 
-    public ChatClientThread(ChatClient _client, Socket _socket) {
+    ChatClientThread(ChatClient _client, Socket _socket) {
         client = _client;
         socket = _socket;
         open();
         start();
     }
 
-    public void open() {
+    private void open() {
         try {
             streamIn = new DataInputStream(socket.getInputStream());
         } catch (IOException ioe) {
@@ -452,9 +469,11 @@ class ChatClientThread extends Thread {
         }
     }
 
-    public void close() {
+    void close() {
         try {
-            if (streamIn != null) streamIn.close();
+            if (streamIn != null) {
+                streamIn.close();
+            }
         } catch (IOException ioe) {
             System.out.println("Error closing input stream: " + ioe);
         }
@@ -465,30 +484,45 @@ class ChatClientThread extends Thread {
             try {
                 int size = streamIn.readInt();
                 byte[] input = new byte[size];
-                streamIn.read(input, 0, size);
-                byte[] toSend = null;
+                int ignored = streamIn.read(input, 0, size);
+                byte[] message;
+                byte[] signatureBytes = new byte[256];
+                ignored = streamIn.read(signatureBytes, 0, 256);
+                boolean signed = false;
 
-                // Decrypt symmetric key signature
+                // Decrypt message
                 try {
                     Cipher cipher = Cipher.getInstance("AES");
                     cipher.init(Cipher.DECRYPT_MODE, client.secretKey);
-                    toSend = cipher.doFinal(input);
+                    message = cipher.doFinal(input);
                     System.out.println("Decrypted received message.");
-                } catch (NoSuchAlgorithmException e) {
+                } catch (NoSuchAlgorithmException|NoSuchPaddingException|BadPaddingException|IllegalBlockSizeException|InvalidKeyException e) {
                     System.out.println("Can't decrypt AES digests.");
-                    continue;
-                } catch (NoSuchPaddingException|BadPaddingException|IllegalBlockSizeException e) {
-                    System.out.println("Error.");
-                    continue;
-                } catch (InvalidKeyException e) {
-                    System.out.println("Invalid key. Can't decrypt symmetric key signature.");
-                    continue;
+                    return;
                 }
 
-                client.handle(new String(toSend));
+                // Check signature
+                try {
+                    Signature signature = Signature.getInstance("SHA256WithRSA");
+                    signature.initVerify(client.serverPublicKey);
+                    signature.update(message);
+                    signed = signature.verify(signatureBytes);
+                } catch (NoSuchAlgorithmException|InvalidKeyException|SignatureException e) {
+                    System.out.println("Error checking signature.");
+                    return;
+                }
+
+                if(!signed) {
+                    System.out.println("SECURITY BREACH! THIS MESSAGE WAS NOT SENT BY THE SERVER!");
+                    client.stop();
+                    return;
+                }
+
+                client.handle(new String(message));
             } catch (IOException ioe) {
                 System.out.println("Listening error: " + ioe.getMessage());
                 client.stop();
+                return;
             }
         }
     }

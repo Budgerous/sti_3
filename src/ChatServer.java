@@ -20,14 +20,14 @@ public class ChatServer implements Runnable {
     private ServerSocket server_socket = null;
     private Thread thread = null;
     private int clientCount = 0;
-    static final String keyFile = Paths.get(".keys", "serverKeys").toString();
+    private static final String keyFile = Paths.get(".keys", "serverKeys").toString();
     PrivateKey privateKey = null;
     PublicKey publicKey = null;
     ArrayList<byte[]> blacklist = null;
-    byte[] password;
+    private byte[] password;
 
     public ChatServer(int port) {
-        if(!setKeys()) {
+        if (!setKeys()) {
             return;
         }
         try {
@@ -55,7 +55,7 @@ public class ChatServer implements Runnable {
         }
     }
 
-    public void start() {
+    private void start() {
         if (thread == null) {
             // Starts new thread for client
             thread = new Thread(this, "Running");
@@ -67,68 +67,69 @@ public class ChatServer implements Runnable {
         }
     }
 
-    public void stop() {
+    private void stop() {
         System.out.println("aaaaa");
         if (blockerThread != null) {
             blockerThread.close();
-            //blockerThread.stop();
-            blockerThread.destroy();
+            blockerThread.stop();
             blockerThread = null;
         }
-        System.out.println("aaaaa");
         if (thread != null) {
-            System.out.println("aaaaa");
             // Stops running thread for client
             thread.stop();
-            System.out.println("aaaaaa");
             thread = null;
         }
     }
 
-    int findClient(int ID) {
+    private int findClient(int ID) {
         // Returns client from id
-        for (int i = 0; i < clientCount; i++)
-            if (clients[i].getID() == ID)
+        for (int i = 0; i < clientCount; i++) {
+            if (clients[i].getID() == ID) {
                 return i;
+            }
+        }
         return -1;
     }
 
-    public synchronized void handle(int ID, String input) {
+    synchronized void handle(int ID, String input) {
         if (input.equals(".quit")) {
             int leaving_id = findClient(ID);
             // Client exits
             clients[leaving_id].send(".quit");
             // Notify remaing users
-            for (int i = 0; i < clientCount; i++)
-                if (i != leaving_id)
+            for (int i = 0; i < clientCount; i++) {
+                if (i != leaving_id) {
                     clients[i].send("Client " + ID + " exits..");
+                }
+            }
             remove(ID);
         } else {
             System.out.println(ID + ": " + input);
             // Brodcast message for every other client online
-            for (int i = 0; i < clientCount; i++)
+            for (int i = 0; i < clientCount; i++) {
                 clients[i].send(ID + ": " + input);
+            }
         }
         clients[findClient(ID)].setCount(clients[findClient(ID)].getCount() + 1);
-        if(clients[findClient(ID)].getCount()%10 == 0) {
+        if (clients[findClient(ID)].getCount() % 10 == 0) {
             clients[findClient(ID)].send(".renew");
-            if(!clients[findClient(ID)].negotiateSymmetricKey()) {
+            if (!clients[findClient(ID)].negotiateSymmetricKey()) {
                 clients[findClient(ID)].send(".quit");
                 remove(ID);
             }
         }
     }
 
-    public synchronized void remove(int ID) {
+    synchronized void remove(int ID) {
         int pos = findClient(ID);
 
         if (pos >= 0) {
             // Removes thread for exiting client
             ChatServerThread toTerminate = clients[pos];
             System.out.println("Removing client thread " + ID + " at " + pos);
-            if (pos < clientCount - 1)
-                for (int i = pos + 1; i < clientCount; i++)
-                    clients[i - 1] = clients[i];
+            if (pos < clientCount - 1) {
+                System.arraycopy(clients, pos + 1, clients, pos, clientCount - 1 - pos);
+            }
             clientCount--;
 
             try {
@@ -140,33 +141,31 @@ public class ChatServer implements Runnable {
             toTerminate.stop();
         }
 
-        FileOutputStream fos = null;
-        ObjectOutputStream oos = null;
+        FileOutputStream fos;
+        ObjectOutputStream oos;
         try {
             fos = new FileOutputStream(keyFile);
             oos = new ObjectOutputStream(fos);
-        } catch (IOException ignored) {
+        } catch (IOException e) {
+            System.out.println("Error opening file to store keys.");
+            return;
         }
 
-        if(fos != null) {
-            try {
-                ArrayList<byte[]> keys = new ArrayList<>();
+        try {
+            ArrayList<byte[]> keys = new ArrayList<>();
 
-                SecretKeySpec spec = new SecretKeySpec(password, "AES");
-                Cipher cipher = Cipher.getInstance("AES");
-                cipher.init(Cipher.ENCRYPT_MODE, spec);
+            SecretKeySpec spec = new SecretKeySpec(password, "AES");
+            Cipher cipher = Cipher.getInstance("AES");
+            cipher.init(Cipher.ENCRYPT_MODE, spec);
 
-                keys.add(cipher.doFinal(privateKey.getEncoded()));
-                keys.add(cipher.doFinal(publicKey.getEncoded()));
+            keys.add(cipher.doFinal(privateKey.getEncoded()));
+            keys.add(cipher.doFinal(publicKey.getEncoded()));
 
-                for(byte[] each : blacklist) {
-                    keys.add(each);
-                }
+            keys.addAll(blacklist);
 
-                oos.writeObject(keys);
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
+            oos.writeObject(keys);
+        } catch (NoSuchAlgorithmException | NoSuchPaddingException | InvalidKeyException | IllegalBlockSizeException | BadPaddingException | IOException e) {
+            System.out.println("Error saving keys.");
         }
     }
 
@@ -190,29 +189,30 @@ public class ChatServer implements Runnable {
             } catch (IOException ioe) {
                 System.out.println("Error opening thread: " + ioe);
             }
-        } else
+        } else {
             System.out.println("Client refused: maximum " + clients.length + " reached.");
+        }
     }
 
-    public boolean setKeys() {
+    private boolean setKeys() {
         System.out.println("Insert password: ");
         DataInputStream dis = new DataInputStream(System.in);
         password = new byte[32];
         FileInputStream fis = null;
-        ObjectInputStream ois = null;
+        ObjectInputStream ois;
 
         // Read password and check if key file exists
         try {
-            dis.read(password, 0, 32);
+            int ignored = dis.read(password, 0, 32);
             fis = new FileInputStream(keyFile);
         } catch (IOException e) {
             System.out.println("Generating new key file.");
         }
 
         // Key file doesn't exist
-        if(fis == null) {
-            FileOutputStream fos = null;
-            ObjectOutputStream oos = null;
+        if (fis == null) {
+            FileOutputStream fos;
+            ObjectOutputStream oos;
             // Generate new key file
             try {
                 fos = new FileOutputStream(keyFile);
@@ -238,12 +238,12 @@ public class ChatServer implements Runnable {
                 // So that no user can login with the server keys
                 blacklist.add(publicKey.getEncoded());
 
-                for(int i = 0; i<blacklist.size() ; i++) {
+                for (int i = 0; i < blacklist.size(); i++) {
                     blacklist.set(i, cipher.doFinal(blacklist.get(i)));
                 }
 
                 oos.writeObject(blacklist);
-            } catch (NoSuchAlgorithmException|NoSuchPaddingException|InvalidKeyException|IllegalBlockSizeException|BadPaddingException e) {
+            } catch (NoSuchAlgorithmException | NoSuchPaddingException | InvalidKeyException | IllegalBlockSizeException | BadPaddingException e) {
                 System.out.println("Couldn't encrypt newly generated keys. Terminating");
                 return false;
             } catch (IOException e) {
@@ -251,8 +251,6 @@ public class ChatServer implements Runnable {
                 return false;
             }
         }
-
-        ois = null;
 
         // Try and open the file again
         try {
@@ -264,14 +262,14 @@ public class ChatServer implements Runnable {
         }
 
         try {
-            blacklist = (ArrayList<byte[]>)ois.readObject();
+            blacklist = (ArrayList<byte[]>) ois.readObject();
             KeyFactory kf = KeyFactory.getInstance("RSA");
 
             SecretKeySpec spec = new SecretKeySpec(password, "AES");
             Cipher cipher = Cipher.getInstance("AES");
             cipher.init(Cipher.DECRYPT_MODE, spec);
 
-            for(int i = 0; i<blacklist.size() ; i++) {
+            for (int i = 0; i < blacklist.size(); i++) {
                 blacklist.set(i, cipher.doFinal(blacklist.get(i)));
             }
 
@@ -279,10 +277,10 @@ public class ChatServer implements Runnable {
             publicKey = kf.generatePublic(new X509EncodedKeySpec(blacklist.get(1)));
             blacklist.remove(0);
             blacklist.remove(0);
-        } catch (NoSuchAlgorithmException|NoSuchPaddingException|InvalidKeyException|IllegalBlockSizeException|BadPaddingException|InvalidKeySpecException e) {
+        } catch (NoSuchAlgorithmException | NoSuchPaddingException | InvalidKeyException | IllegalBlockSizeException | BadPaddingException | InvalidKeySpecException e) {
             System.out.println("Couldn't decrypt stored keys. Terminating.");
             return false;
-        } catch (IOException|ClassNotFoundException e) {
+        } catch (IOException | ClassNotFoundException e) {
             System.out.println("Couldn't read key file. Terminating.");
             return false;
         }
@@ -309,8 +307,9 @@ public class ChatServer implements Runnable {
         return true;
     }
 
+    @SuppressWarnings("unchecked")
     void block(int ID) {
-        if(findClient(ID) == -1) {
+        if (findClient(ID) == -1) {
             return;
         }
         blacklist.add(clients[findClient(ID)].clientPublicKey.getEncoded());
@@ -329,6 +328,7 @@ public class ChatServer implements Runnable {
             oos = new ObjectOutputStream(fos);
         } catch (IOException e) {
             System.out.println("Couldn't create key file. Terminating.");
+            return;
         }
 
         // Create new array list for keys, where each entry is encrypted with AES and the given password
@@ -339,14 +339,16 @@ public class ChatServer implements Runnable {
 
             blacklist.add(0, publicKey.getEncoded());
             blacklist.add(0, privateKey.getEncoded());
-            for(int i = 0; i<blacklist.size() ; i++) {
+            for (int i = 0; i < blacklist.size(); i++) {
                 blacklist.set(i, cipher.doFinal(blacklist.get(i)));
             }
             oos.writeObject(blacklist);
-        } catch (NoSuchAlgorithmException|NoSuchPaddingException|InvalidKeyException|IllegalBlockSizeException|BadPaddingException e) {
-            System.out.println("Error");
+        } catch (NoSuchAlgorithmException | NoSuchPaddingException | InvalidKeyException | IllegalBlockSizeException | BadPaddingException e) {
+            System.out.println("Error encrypting keys to save. Terminating.");
+            return;
         } catch (IOException e) {
             System.out.println("Couldn't store newly generated keys in file. Terminating.");
+            return;
         }
 
         // Try and open the file again
@@ -355,17 +357,18 @@ public class ChatServer implements Runnable {
             ois = new ObjectInputStream(fis);
         } catch (IOException e) {
             System.out.println("Couldn't read key file. Terminating.");
+            return;
         }
 
         try {
-            blacklist = (ArrayList<byte[]>)ois.readObject();
+            blacklist = (ArrayList<byte[]>) ois.readObject();
             KeyFactory kf = KeyFactory.getInstance("RSA");
 
             SecretKeySpec spec = new SecretKeySpec(password, "AES");
             Cipher cipher = Cipher.getInstance("AES");
             cipher.init(Cipher.DECRYPT_MODE, spec);
 
-            for(int i = 0; i<blacklist.size() ; i++) {
+            for (int i = 0; i < blacklist.size(); i++) {
                 blacklist.set(i, cipher.doFinal(blacklist.get(i)));
             }
 
@@ -373,16 +376,15 @@ public class ChatServer implements Runnable {
             publicKey = kf.generatePublic(new X509EncodedKeySpec(blacklist.get(1)));
             blacklist.remove(0);
             blacklist.remove(0);
-        } catch (NoSuchAlgorithmException|NoSuchPaddingException|InvalidKeyException|IllegalBlockSizeException|BadPaddingException|InvalidKeySpecException e) {
+        } catch (NoSuchAlgorithmException | NoSuchPaddingException | InvalidKeyException | IllegalBlockSizeException | BadPaddingException | InvalidKeySpecException e) {
             System.out.println("Couldn't decrypt stored keys. Terminating.");
-            e.printStackTrace();
-        } catch (IOException|ClassNotFoundException e) {
+        } catch (IOException | ClassNotFoundException e) {
             System.out.println("Couldn't read key file. Terminating.");
         }
     }
 
     void exit() {
-        for(int i = clientCount - 1 ; i >= 0 ; i--) {
+        for (int i = clientCount - 1; i >= 0; i--) {
             clients[i].send(".quit");
             remove(clients[i].getID());
         }
@@ -391,18 +393,16 @@ public class ChatServer implements Runnable {
 
         Scanner scanner = new Scanner(System.in);
         scanner.nextLine();
-        // System.exit(0);
-        System.out.println("bbbbb");
-        stop();
+        System.exit(0);
     }
 
     public static void main(String args[]) {
         ChatServer server = null;
 
-        if (args.length != 1)
+        if (args.length != 1) {
             // Displays correct usage for server
             System.out.println("Usage: java ChatServer port");
-        else {
+        } else {
             // Calls new server
             server = new ChatServer(Integer.parseInt(args[0]));
         }
@@ -412,38 +412,40 @@ public class ChatServer implements Runnable {
 
 class BlockerThread extends Thread {
     private ChatServer server = null;
-    DataInputStream console = null;
-    public BlockerThread(ChatServer _server) {
+    private DataInputStream console = null;
+
+    BlockerThread(ChatServer _server) {
         super("Blocker");
         server = _server;
     }
 
     public void run() {
         console = new DataInputStream(System.in);
-        while(true) {
+        while (true) {
             try {
                 String command = console.readLine();
-                if(command.startsWith(".block")) {
+                if (command.startsWith(".block")) {
                     StringTokenizer st = new StringTokenizer(command);
                     st.nextToken();
                     server.block(Integer.parseInt(st.nextToken()));
-                } else if(command.compareTo(".quit") == 0) {
+                } else if (command.compareTo(".quit") == 0) {
                     server.exit();
                 }
             } catch (IOException e) {
-                e.printStackTrace();
+                System.out.println("Error reading user command.");
+                return;
             }
         }
     }
 
-    public void close() {
-       if(console!=null) {
-           try {
-               console.close();
-           } catch (IOException e) {
-               System.out.println("Error closing console.");
-           }
-       }
+    void close() {
+        if (console != null) {
+            try {
+                console.close();
+            } catch (IOException e) {
+                System.out.println("Error closing console.");
+            }
+        }
     }
 }
 
@@ -452,20 +454,20 @@ class ChatServerThread extends Thread {
     private Socket socket = null;
     private int ID = -1;
     private int count = 0;
-    DataInputStream streamIn = null;
+    private DataInputStream streamIn = null;
     DataOutputStream streamOut = null;
     PublicKey clientPublicKey = null;
     private SecretKey symmetricKey = null;
 
-    public int getCount() {
+    int getCount() {
         return count;
     }
 
-    public void setCount(int count) {
+    void setCount(int count) {
         this.count = count;
     }
 
-    public ChatServerThread(ChatServer _server, Socket _socket) {
+    ChatServerThread(ChatServer _server, Socket _socket) {
         super();
         server = _server;
         socket = _socket;
@@ -473,8 +475,9 @@ class ChatServerThread extends Thread {
     }
 
     // Sends message to client
-    public void send(String msg) {
+    void send(String msg) {
         byte[] toSend = null;
+        byte[] signatureBytes = null;
 
         // Encrypt message
         try {
@@ -485,7 +488,7 @@ class ChatServerThread extends Thread {
         } catch (NoSuchAlgorithmException e) {
             System.out.println("Can't encrypt message with AES.");
             return;
-        } catch (NoSuchPaddingException|BadPaddingException|IllegalBlockSizeException e) {
+        } catch (NoSuchPaddingException | BadPaddingException | IllegalBlockSizeException e) {
             System.out.println("Error.");
             return;
         } catch (InvalidKeyException e) {
@@ -493,10 +496,23 @@ class ChatServerThread extends Thread {
             return;
         }
 
+        // Sign message
+        try {
+            Signature signature = Signature.getInstance("SHA256WithRSA");
+            signature.initSign(server.privateKey);
+            signature.update(msg.getBytes());
+            signatureBytes = signature.sign();
+        } catch (NoSuchAlgorithmException | InvalidKeyException | SignatureException e) {
+            System.out.println("Can't sign message with your key.");
+            return;
+        }
+
         try {
             streamOut.writeInt(toSend.length);
             streamOut.flush();
             streamOut.write(toSend, 0, toSend.length);
+            streamOut.flush();
+            streamOut.write(signatureBytes, 0, 256);
             streamOut.flush();
         } catch (IOException ioexception) {
             System.out.println(ID + " ERROR sending message: " + ioexception.getMessage());
@@ -506,7 +522,7 @@ class ChatServerThread extends Thread {
     }
 
     // Gets id for client
-    public int getID() {
+    int getID() {
         return ID;
     }
 
@@ -518,28 +534,40 @@ class ChatServerThread extends Thread {
             try {
                 int size = streamIn.readInt();
                 byte[] input = new byte[size];
-                streamIn.read(input, 0, size);
-                byte[] toSend = null;
+                int ignored = streamIn.read(input, 0, size);
+                byte[] message = null;
+                byte[] signatureBytes = new byte[256];
+                ignored = streamIn.read(signatureBytes, 0, 256);
+                boolean signed = false;
 
                 // Decrypt message
                 try {
                     Cipher cipher = Cipher.getInstance("AES");
                     cipher.init(Cipher.DECRYPT_MODE, symmetricKey);
-                    toSend = cipher.doFinal(input);
+                    message = cipher.doFinal(input);
                     System.out.println("Decrypted received message.");
-                } catch (NoSuchAlgorithmException e) {
+                } catch (NoSuchAlgorithmException | NoSuchPaddingException | BadPaddingException | IllegalBlockSizeException | InvalidKeyException e) {
                     System.out.println("Can't decrypt AES digests.");
-                    continue;
-                } catch (NoSuchPaddingException|BadPaddingException|IllegalBlockSizeException e) {
-                    System.out.println("Error.");
-                    e.printStackTrace();
-                    continue;
-                } catch (InvalidKeyException e) {
-                    System.out.println("Invalid key. Can't decrypt symmetric key signature.");
-                    continue;
+                    return;
                 }
 
-                server.handle(ID, new String(toSend));
+                // Check signature
+                try {
+                    Signature signature = Signature.getInstance("SHA256WithRSA");
+                    signature.initVerify(clientPublicKey);
+                    signature.update(message);
+                    signed = signature.verify(signatureBytes);
+                } catch (NoSuchAlgorithmException | InvalidKeyException | SignatureException e) {
+                    e.printStackTrace();
+                }
+
+                if (!signed) {
+                    System.out.println("SECURITY BREACH! THIS MESSAGE WAS NOT SENT BY THIS USER!");
+                    server.remove(ID);
+                    stop();
+                }
+
+                server.handle(ID, new String(message));
             } catch (IOException ioe) {
                 System.out.println(ID + " ERROR reading: " + ioe.getMessage());
                 server.remove(ID);
@@ -549,18 +577,22 @@ class ChatServerThread extends Thread {
     }
 
     // Opens thread
-    public void open() throws IOException {
-        streamIn = new DataInputStream(new
-                BufferedInputStream(socket.getInputStream()));
-        streamOut = new DataOutputStream(new
-                BufferedOutputStream(socket.getOutputStream()));
+    void open() throws IOException {
+        streamIn = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
+        streamOut = new DataOutputStream(new BufferedOutputStream(socket.getOutputStream()));
     }
 
     // Closes thread
-    public void close() throws IOException {
-        if (socket != null) socket.close();
-        if (streamIn != null) streamIn.close();
-        if (streamOut != null) streamOut.close();
+    void close() throws IOException {
+        if (socket != null) {
+            socket.close();
+        }
+        if (streamIn != null) {
+            streamIn.close();
+        }
+        if (streamOut != null) {
+            streamOut.close();
+        }
     }
 
     boolean handShake() {
@@ -568,7 +600,7 @@ class ChatServerThread extends Thread {
         try {
             int keyLength = streamIn.readInt();
             byte[] keyBytes = new byte[keyLength];
-            streamIn.read(keyBytes, 0, keyLength);
+            int ignored = streamIn.read(keyBytes, 0, keyLength);
             X509EncodedKeySpec pubKeySpec = new X509EncodedKeySpec(keyBytes);
             KeyFactory keyFactory = null;
             keyFactory = KeyFactory.getInstance("RSA");
@@ -586,8 +618,8 @@ class ChatServerThread extends Thread {
         }
 
         // Check if client is blocked
-        for(int i = 0; i < server.blacklist.size() ; i++) {
-            if(Arrays.equals(server.blacklist.get(i), clientPublicKey.getEncoded())) {
+        for (int i = 0; i < server.blacklist.size(); i++) {
+            if (Arrays.equals(server.blacklist.get(i), clientPublicKey.getEncoded())) {
                 System.out.println("User blocked. Terminating connection.");
                 return false;
             }
@@ -604,7 +636,7 @@ class ChatServerThread extends Thread {
             return false;
         }
 
-        if(!negotiateSymmetricKey()) {
+        if (!negotiateSymmetricKey()) {
             System.out.println("Error negotiating symmetric key.");
             return false;
         }
@@ -613,7 +645,7 @@ class ChatServerThread extends Thread {
         return true;
     }
 
-    boolean negotiateSymmetricKey(){
+    boolean negotiateSymmetricKey() {
         byte[] encryptedSymmetricKey = null;
         byte[] decryptedSymmetricKey = null;
         byte[] encryptedSignature = null;
@@ -623,7 +655,7 @@ class ChatServerThread extends Thread {
         try {
             int keyLength = streamIn.readInt();
             encryptedSymmetricKey = new byte[keyLength];
-            streamIn.read(encryptedSymmetricKey, 0, keyLength);
+            int ignored = streamIn.read(encryptedSymmetricKey, 0, keyLength);
             System.out.println("Received encrypted symmetric key from client.");
         } catch (IOException e) {
             System.out.println("Error receiving encrypted symmetric key from socket.");
@@ -641,7 +673,7 @@ class ChatServerThread extends Thread {
         } catch (NoSuchAlgorithmException e) {
             System.out.println("Can't decrypt RSA digests.");
             return false;
-        } catch (NoSuchPaddingException|BadPaddingException|IllegalBlockSizeException e) {
+        } catch (NoSuchPaddingException | BadPaddingException | IllegalBlockSizeException e) {
             System.out.println("Error.");
             return false;
         } catch (InvalidKeyException e) {
@@ -653,7 +685,7 @@ class ChatServerThread extends Thread {
         try {
             int signLength = streamIn.readInt();
             encryptedSignature = new byte[signLength];
-            streamIn.read(encryptedSignature, 0, signLength);
+            int ignored = streamIn.read(encryptedSignature, 0, signLength);
             System.out.println("Received encrypted symmetric key signature from client.");
         } catch (IOException e) {
             System.out.println("Error receiving encrypted symmetric key signature from socket.");
@@ -669,7 +701,7 @@ class ChatServerThread extends Thread {
         } catch (NoSuchAlgorithmException e) {
             System.out.println("Can't decrypt AES digests.");
             return false;
-        } catch (NoSuchPaddingException|BadPaddingException|IllegalBlockSizeException e) {
+        } catch (NoSuchPaddingException | BadPaddingException | IllegalBlockSizeException e) {
             System.out.println("Error.");
             return false;
         } catch (InvalidKeyException e) {
@@ -694,7 +726,7 @@ class ChatServerThread extends Thread {
             return false;
         }
 
-        if(result) {
+        if (result) {
             System.out.println("Signature correctly verified. Saving symmetric key.");
         } else {
             System.out.println("Couldn't verify symmetric key signature.");
