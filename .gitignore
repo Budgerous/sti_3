@@ -65,20 +65,4 @@ fabric.properties
 
 # End of https://www.gitignore.io/api/intellij
 
-Facebook
-
-
-Projects · Dashboard · GitLab
-
-
-Budgerous/sti_3
-
-
-https://www.gitignore.io/api/intellij
-
-
-
-
-
-
-https://www.gitignore.io/api/intellij
+.keys/

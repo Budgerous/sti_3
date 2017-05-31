@@ -1,12 +1,15 @@
 import javax.crypto.*;
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.IOException;
+import javax.crypto.spec.SecretKeySpec;
+import java.io.*;
 import java.net.Socket;
 import java.net.UnknownHostException;
+import java.nio.file.Paths;
 import java.security.*;
 import java.security.spec.InvalidKeySpecException;
+import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
+import java.util.ArrayList;
+import java.util.Arrays;
 
 
 public class ChatClient implements Runnable {
@@ -19,6 +22,9 @@ public class ChatClient implements Runnable {
     protected PublicKey publicKey = null;
     protected PublicKey serverPublicKey = null;
     protected SecretKey secretKey = null;
+    String keyFile;
+    String username;
+    byte[] password;
 
     public ChatClient(String serverName, int serverPort) {
         System.out.println("Establishing connection to server...");
@@ -79,6 +85,126 @@ public class ChatClient implements Runnable {
         }
     }
 
+    boolean setKeys() {
+        DataInputStream dis = new DataInputStream(System.in);
+        password = new byte[32];
+        FileInputStream fis = null;
+        ObjectInputStream ois = null;
+        String keyFile = null;
+        boolean fileExists = true;
+
+        // Read username and password
+        try {
+            System.out.println("Insert username: ");
+            username = dis.readLine();
+            System.out.println("Insert password: ");
+            dis.read(password, 0, 32);
+            keyFile = Paths.get(".keys", username.concat(".keys")).toString();
+        } catch (IOException e) {
+            System.out.println("Something went horribly wrong. We're soory.");
+            return false;
+        }
+
+
+        // Check if key file exists
+        try {
+            fis = new FileInputStream(keyFile);
+        } catch (IOException e) {
+            System.out.println("Generating new key file.");
+        }
+
+        // Key file doesn't exist
+        if(fis == null) {
+            fileExists = false;
+            FileOutputStream fos = null;
+            ObjectOutputStream oos = null;
+            // Generate new key file
+            try {
+                fos = new FileOutputStream(keyFile);
+                oos = new ObjectOutputStream(fos);
+            } catch (IOException e) {
+                System.out.println("Couldn't create key file. Terminating.");
+                return false;
+            }
+
+            generateKeys();
+
+            // Create new array list for keys, where each entry is encrypted with AES and the given password
+            try {
+                ArrayList<byte[]> keyList = new ArrayList<>();
+
+                SecretKeySpec spec = new SecretKeySpec(password, "AES");
+                Cipher cipher = Cipher.getInstance("AES");
+                cipher.init(Cipher.ENCRYPT_MODE, spec);
+
+                // First two entries are server keys
+                keyList.add(cipher.doFinal(privateKey.getEncoded()));
+                keyList.add(cipher.doFinal(publicKey.getEncoded()));
+
+                oos.writeObject(keyList);
+            } catch (NoSuchAlgorithmException|NoSuchPaddingException|InvalidKeyException|IllegalBlockSizeException|BadPaddingException e) {
+                System.out.println("Couldn't encrypt newly generated keys. Terminating");
+                return false;
+            } catch (IOException e) {
+                System.out.println("Couldn't store newly generated keys in file. Terminating.");
+                return false;
+            }
+        }
+
+        ois = null;
+
+        // Try and open the file again
+        try {
+            fis = new FileInputStream(keyFile);
+            ois = new ObjectInputStream(fis);
+        } catch (IOException e) {
+            System.out.println("Couldn't read key file. Terminating.");
+            return false;
+        }
+
+        try {
+            ArrayList<byte[]> keyList = (ArrayList<byte[]>)ois.readObject();
+            KeyFactory kf = KeyFactory.getInstance("RSA");
+
+            SecretKeySpec spec = new SecretKeySpec(password, "AES");
+            Cipher cipher = Cipher.getInstance("AES");
+            cipher.init(Cipher.DECRYPT_MODE, spec);
+
+            privateKey = kf.generatePrivate(new PKCS8EncodedKeySpec(cipher.doFinal(keyList.get(0))));
+            publicKey = kf.generatePublic(new X509EncodedKeySpec(cipher.doFinal(keyList.get(1))));
+        } catch (NoSuchAlgorithmException|NoSuchPaddingException|InvalidKeyException|IllegalBlockSizeException|BadPaddingException|InvalidKeySpecException e) {
+            if(fileExists) {
+                System.out.println("Wrong username or password. Try again.");
+            } else {
+                System.out.println("Couldn't decrypt stored keys. Terminating.");
+            }
+            return false;
+        } catch (IOException|ClassNotFoundException e) {
+            System.out.println("Couldn't read key file. Terminating.");
+            return false;
+        }
+
+        return true;
+    }
+
+    private boolean generateKeys() {
+        // Generate key pair
+        try {
+            System.out.println("Generating key pair.");
+            KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA");
+            SecureRandom random = SecureRandom.getInstance("SHA1PRNG");
+            keyGen.initialize(2048, random);
+
+            KeyPair pair = keyGen.generateKeyPair();
+            privateKey = pair.getPrivate();
+            publicKey = pair.getPublic();
+            System.out.println("Key pair generated.");
+        } catch (Exception e) {
+            System.out.println("Error generating key pair.");
+            return false;
+        }
+        return true;
+    }
 
     public void handle(String msg) {
         // Receives message from server
@@ -101,19 +227,8 @@ public class ChatClient implements Runnable {
     }
 
     private boolean handShake() {
-        // Generate key pair
-        try {
-            System.out.println("Generating key pair.");
-            KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA");
-            SecureRandom random = SecureRandom.getInstance("SHA1PRNG");
-            keyGen.initialize(2048, random);
-
-            KeyPair pair = keyGen.generateKeyPair();
-            privateKey = pair.getPrivate();
-            publicKey = pair.getPublic();
-            System.out.println("Key pair generated.");
-        } catch (Exception e) {
-            System.out.println("Error generating key pair.");
+        if(!setKeys()) {
+            System.out.println("Couldn't generate keys.");
             return false;
         }
 
@@ -133,6 +248,12 @@ public class ChatClient implements Runnable {
         try {
             DataInputStream streamIn = new DataInputStream(socket.getInputStream());
             int keyLength = streamIn.readInt();
+
+            if(keyLength == 0) {
+                System.out.println("You have been blocked. Terminating.");
+                return false;
+            }
+
             byte[] keyBytes = new byte[keyLength];
             streamIn.read(keyBytes, 0, keyLength);
             X509EncodedKeySpec pubKeySpec = new X509EncodedKeySpec(keyBytes);
