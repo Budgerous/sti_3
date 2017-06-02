@@ -1,3 +1,5 @@
+import org.apache.log4j.Logger;
+
 import javax.crypto.*;
 import javax.crypto.spec.SecretKeySpec;
 import java.io.*;
@@ -21,27 +23,28 @@ public class ChatClient implements Runnable {
     private PublicKey publicKey = null;
     PublicKey serverPublicKey = null;
     SecretKey secretKey = null;
+    private final static Logger LOGGER = Logger.getLogger("Client");
 
     public ChatClient(String serverName, int serverPort) {
-        System.out.println("Establishing connection to server...");
+        LOGGER.info("Establishing connection to server...");
 
         try {
             // Establishes connection with server (name and port)
             socket = new Socket(serverName, serverPort);
-            System.out.println("Connected to server: " + socket);
+            LOGGER.info("Connected to server: " + socket);
             setStreams();
             if (handShake()) {
                 start();
             } else {
-                System.out.println("Terminating.");
+                LOGGER.error("Terminating.");
                 socket.close();
             }
         } catch (UnknownHostException uhe) {
             // Host unkwnown
-            System.out.println("Error establishing connection - host unknown: " + uhe.getMessage());
+            LOGGER.error("Error establishing connection - host unknown: " + uhe.getMessage());
         } catch (IOException ioexception) {
             // Other error establishing connection
-            System.out.println("Error establishing connection - unexpected exception: " + ioexception.getMessage());
+            LOGGER.error("Error establishing connection - unexpected exception: " + ioexception.getMessage());
         }
 
     }
@@ -59,16 +62,17 @@ public class ChatClient implements Runnable {
                     Cipher cipher = Cipher.getInstance("AES");
                     cipher.init(Cipher.ENCRYPT_MODE, secretKey);
                     toSend = cipher.doFinal(input.getBytes());
-                    System.out.println("Successfully encrypted message with symmetric key.");
+                    LOGGER.info("Successfully encrypted message with symmetric key.");
                 } catch (NoSuchAlgorithmException e) {
-                    System.out.println("Can't encrypt message with AES.");
+                    LOGGER.error("Can't encrypt message with AES.");
                     return;
                 } catch (NoSuchPaddingException|BadPaddingException|IllegalBlockSizeException e) {
-                    System.out.println("Error.");
+                    LOGGER.error("Error encrypting message.");
                     return;
                 } catch (InvalidKeyException e) {
-                    System.out.println("Can't encrypt message with your key.");
+                    LOGGER.error("Can't encrypt message with your key.");
                     stop();
+                    return;
                 }
 
                 // Sign message
@@ -78,8 +82,9 @@ public class ChatClient implements Runnable {
                     signature.update(input.getBytes());
                     signatureBytes = signature.sign();
                 } catch (NoSuchAlgorithmException|InvalidKeyException|SignatureException e) {
-                    System.out.println("Error signing message.");
+                    LOGGER.error("Error signing message.");
                     stop();
+                    return;
                 }
 
                 streamOut.writeInt(toSend.length);
@@ -89,7 +94,7 @@ public class ChatClient implements Runnable {
                 streamOut.write(signatureBytes, 0, 256);
                 streamOut.flush();
             } catch (IOException ioexception) {
-                System.out.println("Error sending string to server: " + ioexception.getMessage());
+                LOGGER.error("Error sending string to server: " + ioexception.getMessage());
                 stop();
             }
         }
@@ -112,7 +117,7 @@ public class ChatClient implements Runnable {
             int ignored = dis.read(password, 0, 32);
             keyFile = Paths.get(".keys", username.concat(".keys")).toString();
         } catch (IOException e) {
-            System.out.println("Something went horribly wrong. We're soory.");
+            LOGGER.error("Something went horribly wrong. We're soory.");
             return false;
         }
 
@@ -121,7 +126,7 @@ public class ChatClient implements Runnable {
         try {
             fis = new FileInputStream(keyFile);
         } catch (IOException e) {
-            System.out.println("Generating new key file.");
+            LOGGER.info("Generating new key file.");
         }
 
         // Key file doesn't exist
@@ -134,7 +139,7 @@ public class ChatClient implements Runnable {
                 fos = new FileOutputStream(keyFile);
                 oos = new ObjectOutputStream(fos);
             } catch (IOException e) {
-                System.out.println("Couldn't create key file. Terminating.");
+                LOGGER.error("Couldn't create key file. Terminating.");
                 return false;
             }
 
@@ -154,10 +159,10 @@ public class ChatClient implements Runnable {
 
                 oos.writeObject(keyList);
             } catch (NoSuchAlgorithmException|NoSuchPaddingException|InvalidKeyException|IllegalBlockSizeException|BadPaddingException e) {
-                System.out.println("Couldn't encrypt newly generated keys. Terminating");
+                LOGGER.error("Couldn't encrypt newly generated keys. Terminating");
                 return false;
             } catch (IOException e) {
-                System.out.println("Couldn't store newly generated keys in file. Terminating.");
+                LOGGER.error("Couldn't store newly generated keys in file. Terminating.");
                 return false;
             }
         }
@@ -167,7 +172,7 @@ public class ChatClient implements Runnable {
             fis = new FileInputStream(keyFile);
             ois = new ObjectInputStream(fis);
         } catch (IOException e) {
-            System.out.println("Couldn't read key file. Terminating.");
+            LOGGER.error("Couldn't read key file. Terminating.");
             return false;
         }
 
@@ -183,13 +188,13 @@ public class ChatClient implements Runnable {
             publicKey = kf.generatePublic(new X509EncodedKeySpec(cipher.doFinal(keyList.get(1))));
         } catch (NoSuchAlgorithmException|NoSuchPaddingException|InvalidKeyException|IllegalBlockSizeException|BadPaddingException|InvalidKeySpecException e) {
             if(fileExists) {
-                System.out.println("Wrong username or password. Try again.");
+                LOGGER.error("Wrong username or password. Try again.");
             } else {
-                System.out.println("Couldn't decrypt stored keys. Terminating.");
+                LOGGER.error("Couldn't decrypt stored keys. Terminating.");
             }
             return false;
         } catch (IOException|ClassNotFoundException e) {
-            System.out.println("Couldn't read key file. Terminating.");
+            LOGGER.error("Couldn't read key file. Terminating.");
             return false;
         }
 
@@ -199,7 +204,7 @@ public class ChatClient implements Runnable {
     private boolean generateKeys() {
         // Generate key pair
         try {
-            System.out.println("Generating key pair.");
+            LOGGER.info("Generating key pair.");
             KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA");
             SecureRandom random = SecureRandom.getInstance("SHA1PRNG");
             keyGen.initialize(2048, random);
@@ -207,9 +212,9 @@ public class ChatClient implements Runnable {
             KeyPair pair = keyGen.generateKeyPair();
             privateKey = pair.getPrivate();
             publicKey = pair.getPublic();
-            System.out.println("Key pair generated.");
+            LOGGER.info("Key pair generated.");
         } catch (Exception e) {
-            System.out.println("Error generating key pair.");
+            LOGGER.error("Error generating key pair.");
             return false;
         }
         return true;
@@ -242,7 +247,7 @@ public class ChatClient implements Runnable {
 
     private boolean handShake() {
         if(!setKeys()) {
-            System.out.println("Couldn't generate keys.");
+            LOGGER.error("Couldn't generate keys.");
             return false;
         }
 
@@ -252,9 +257,9 @@ public class ChatClient implements Runnable {
             streamOut.flush();
             streamOut.write(publicKey.getEncoded());
             streamOut.flush();
-            System.out.println("Public key sent to server.");
+            LOGGER.info("Public key sent to server.");
         } catch (IOException e) {
-            System.out.println("Error sending public key to server.");
+            LOGGER.error("Error sending public key to server.");
             return false;
         }
 
@@ -264,7 +269,7 @@ public class ChatClient implements Runnable {
             int keyLength = streamIn.readInt();
 
             if(keyLength == 0) {
-                System.out.println("You have been blocked. Terminating.");
+                LOGGER.error("You have been blocked. Terminating.");
                 return false;
             }
 
@@ -274,24 +279,24 @@ public class ChatClient implements Runnable {
             KeyFactory keyFactory = null;
             keyFactory = KeyFactory.getInstance("RSA");
             serverPublicKey = keyFactory.generatePublic(pubKeySpec);
-            System.out.println("Received public key from server.");
+            LOGGER.info("Received public key from server.");
         } catch (IOException e) {
-            System.out.println("Error receiving public key from socket.");
+            LOGGER.error("Error receiving public key from socket.");
             return false;
         } catch (NoSuchAlgorithmException e) {
-            System.out.println("Error generating key factory.");
+            LOGGER.error("Error generating key factory.");
             return false;
         } catch (InvalidKeySpecException e) {
-            System.out.println("Error converting key.");
+            LOGGER.error("Error converting key.");
             return false;
         }
 
         if(!negotiateSymmetricKey()) {
-            System.out.println("Error negotiating symmetric key.");
+            LOGGER.error("Error negotiating symmetric key.");
             return false;
         }
 
-        System.out.println("Handshake completed.");
+        LOGGER.info("Handshake completed.");
         return true;
     }
 
@@ -299,15 +304,16 @@ public class ChatClient implements Runnable {
         byte[] encryptedSymmKey;
         byte[] signedKey;
         byte[] encryptedSignature;
+
         // Generate symmetric key
         try {
             SecureRandom random = SecureRandom.getInstance("SHA1PRNG");
             KeyGenerator keyGenerator = KeyGenerator.getInstance("AES");
             keyGenerator.init(256, random);
             secretKey = keyGenerator.generateKey();
-            System.out.println("Symmetric key generated.");
+            LOGGER.info("Symmetric key generated.");
         } catch (NoSuchAlgorithmException e) {
-            System.out.println("Error generating symmetric key.");
+            LOGGER.error("Error generating symmetric key.");
             return false;
         }
 
@@ -317,15 +323,15 @@ public class ChatClient implements Runnable {
             cipher.init(Cipher.ENCRYPT_MODE, serverPublicKey);
             cipher.update(secretKey.getEncoded());
             encryptedSymmKey = cipher.doFinal();
-            System.out.println("Successfully encrypted symmetric key with server public key.");
+            LOGGER.info("Successfully encrypted symmetric key with server public key.");
         } catch (NoSuchAlgorithmException e) {
-            System.out.println("Can't encrypt message with RSA.");
+            LOGGER.error("Can't encrypt message with RSA.");
             return false;
         } catch (NoSuchPaddingException|BadPaddingException|IllegalBlockSizeException e) {
-            System.out.println("Error.");
+            LOGGER.error("Error encrypting message.");
             return false;
         } catch (InvalidKeyException e) {
-            System.out.println("Can't encrypt message with your key.");
+            LOGGER.error("Can't encrypt message with your key.");
             return false;
         }
 
@@ -335,9 +341,9 @@ public class ChatClient implements Runnable {
             streamOut.flush();
             streamOut.write(encryptedSymmKey);
             streamOut.flush();
-            System.out.println("Symmetric key sent to server.");
+            LOGGER.info("Symmetric key sent to server.");
         } catch (IOException e) {
-            System.out.println("Error sending symmetric key to server.");
+            LOGGER.error("Error sending symmetric key to server.");
             return false;
         }
 
@@ -347,15 +353,15 @@ public class ChatClient implements Runnable {
             signature.initSign(privateKey);
             signature.update(secretKey.getEncoded());
             signedKey = signature.sign();
-            System.out.println("Symmetric key signed with private key.");
+            LOGGER.info("Symmetric key signed with private key.");
         } catch (NoSuchAlgorithmException e) {
-            System.out.println("Error generating key signer.");
+            LOGGER.error("Error generating key signer.");
             return false;
         } catch (SignatureException e) {
-            System.out.println("Error signing key.");
+            LOGGER.error("Error signing key.");
             return false;
         } catch (InvalidKeyException e) {
-            System.out.println("Error seeding private key for signature.");
+            LOGGER.error("Error seeding private key for signature.");
             return false;
         }
 
@@ -364,15 +370,15 @@ public class ChatClient implements Runnable {
             Cipher cipher = Cipher.getInstance("AES");
             cipher.init(Cipher.ENCRYPT_MODE, secretKey);
             encryptedSignature = cipher.doFinal(signedKey);
-            System.out.println("Successfully encrypted symmetric key signature with symmetric key.");
+            LOGGER.info("Successfully encrypted symmetric key signature with symmetric key.");
         } catch (NoSuchAlgorithmException e) {
-            System.out.println("Can't encrypt message with AES.");
+            LOGGER.error("Can't encrypt message with AES.");
             return false;
         } catch (NoSuchPaddingException|BadPaddingException|IllegalBlockSizeException e) {
-            System.out.println("Error.");
+            LOGGER.error("Error encrypting message.");
             return false;
         } catch (InvalidKeyException e) {
-            System.out.println("Can't encrypt message with your key.");
+            LOGGER.error("Can't encrypt message with your key.");
             return false;
         }
 
@@ -382,9 +388,9 @@ public class ChatClient implements Runnable {
             streamOut.flush();
             streamOut.write(encryptedSignature);
             streamOut.flush();
-            System.out.println("Symmetric key signature sent to server.");
+            LOGGER.info("Symmetric key signature sent to server.");
         } catch (IOException e) {
-            System.out.println("Error sending symmetric key signature to server.");
+            LOGGER.error("Error sending symmetric key signature to server.");
             return false;
         }
 
@@ -393,13 +399,13 @@ public class ChatClient implements Runnable {
             DataInputStream streamIn = new DataInputStream(socket.getInputStream());
             byte success = streamIn.readByte();
             if(success == 6) {
-                System.out.println("Received acknowledge message from server.");
+                LOGGER.info("Received acknowledge message from server.");
             } else {
-                System.out.println("Error receiving acknowledge message from server.");
+                LOGGER.error("Error receiving acknowledge message from server.");
                 return false;
             }
         } catch (IOException e) {
-            System.out.println("Error receiving acknowledge message from server.");
+            LOGGER.error("Error receiving acknowledge message from server.");
             return false;
         }
 
@@ -432,7 +438,7 @@ public class ChatClient implements Runnable {
                 socket.close();
             }
         } catch (IOException ioe) {
-            System.out.println("Error closing thread...");
+            LOGGER.error("Error closing thread...");
         }
         client.close();
         client.stop();
@@ -453,6 +459,7 @@ class ChatClientThread extends Thread {
     private Socket socket = null;
     private ChatClient client = null;
     private DataInputStream streamIn = null;
+    private final static Logger LOGGER = Logger.getLogger("Client");
 
     ChatClientThread(ChatClient _client, Socket _socket) {
         client = _client;
@@ -465,7 +472,7 @@ class ChatClientThread extends Thread {
         try {
             streamIn = new DataInputStream(socket.getInputStream());
         } catch (IOException ioe) {
-            System.out.println("Error getting input stream: " + ioe);
+            LOGGER.error("Error getting input stream: " + ioe);
             client.stop();
         }
     }
@@ -476,7 +483,7 @@ class ChatClientThread extends Thread {
                 streamIn.close();
             }
         } catch (IOException ioe) {
-            System.out.println("Error closing input stream: " + ioe);
+            LOGGER.error("Error closing input stream: " + ioe);
         }
     }
 
@@ -496,9 +503,9 @@ class ChatClientThread extends Thread {
                     Cipher cipher = Cipher.getInstance("AES");
                     cipher.init(Cipher.DECRYPT_MODE, client.secretKey);
                     message = cipher.doFinal(input);
-                    System.out.println("Decrypted received message.");
+                    LOGGER.info("Decrypted received message.");
                 } catch (NoSuchAlgorithmException|NoSuchPaddingException|BadPaddingException|IllegalBlockSizeException|InvalidKeyException e) {
-                    System.out.println("Can't decrypt AES digests.");
+                    LOGGER.error("Can't decrypt AES digests.");
                     return;
                 }
 
@@ -509,19 +516,19 @@ class ChatClientThread extends Thread {
                     signature.update(message);
                     signed = signature.verify(signatureBytes);
                 } catch (NoSuchAlgorithmException|InvalidKeyException|SignatureException e) {
-                    System.out.println("Error checking signature.");
+                    LOGGER.error("Error checking signature.");
                     return;
                 }
 
                 if(!signed) {
-                    System.out.println("SECURITY BREACH! THIS MESSAGE WAS NOT SENT BY THE SERVER!");
+                    LOGGER.error("SECURITY BREACH! THIS MESSAGE WAS NOT SENT BY THE SERVER!");
                     client.stop();
                     return;
                 }
 
                 client.handle(new String(message));
             } catch (IOException ioe) {
-                System.out.println("Listening error: " + ioe.getMessage());
+                LOGGER.error("Listening error: " + ioe.getMessage());
                 client.stop();
                 return;
             }
