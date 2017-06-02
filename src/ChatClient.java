@@ -68,7 +68,7 @@ public class ChatClient implements Runnable {
                     return;
                 } catch (InvalidKeyException e) {
                     System.out.println("Can't encrypt message with your key.");
-                    return;
+                    stop();
                 }
 
                 // Sign message
@@ -78,7 +78,8 @@ public class ChatClient implements Runnable {
                     signature.update(input.getBytes());
                     signatureBytes = signature.sign();
                 } catch (NoSuchAlgorithmException|InvalidKeyException|SignatureException e) {
-                    e.printStackTrace();
+                    System.out.println("Error signing message.");
+                    stop();
                 }
 
                 streamOut.writeInt(toSend.length);

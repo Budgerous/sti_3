@@ -558,7 +558,7 @@ class ChatServerThread extends Thread {
                     signature.update(message);
                     signed = signature.verify(signatureBytes);
                 } catch (NoSuchAlgorithmException | InvalidKeyException | SignatureException e) {
-                    e.printStackTrace();
+                    System.out.println("Error checking signature.");
                 }
 
                 if (!signed) {
