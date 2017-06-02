@@ -289,7 +289,6 @@ public class ChatServer implements Runnable {
             return;
         }
         blacklist.add(clients[findClient(ID)].clientPublicKey.getEncoded());
-        LOGGER.info("Blocking " + Arrays.toString(clients[findClient(ID)].clientPublicKey.getEncoded()));
         clients[findClient(ID)].send("Your account has been blocked.");
         clients[findClient(ID)].send(".quit");
         remove(ID);
